@@ -1,6 +1,8 @@
-from pydantic import BaseModel, field_validator
+from __future__ import annotations
+
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -30,6 +32,10 @@ Agent 4 (Hypothesis gen)
 || Agents 1-3: reactive search (something happened, find why)
 || Agent 4: speculative search (seems like something will happen, find early proof)
 """
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 
@@ -96,7 +102,7 @@ class Ticker(BaseModel):
 
 class TickerRegistry(BaseModel):
     ticker: str
-    subscribers: list["Subscription"] = []
+    subscribers: list[Subscription] = Field(default_factory=list)
     current_price: Optional[float] = None
     last_fetched: Optional[datetime] = None
 
@@ -127,7 +133,7 @@ class User(BaseModel):
     whatsapp_number: str
     email: Optional[str] = None
     created_at: Optional[datetime] = None
-    preferences: Optional[dict] = {}
+    preferences: dict = Field(default_factory=dict)
 
 
 class Subscription(BaseModel):
@@ -137,7 +143,7 @@ class Subscription(BaseModel):
     shares: float
     motive: Motive
     update_interval: UpdateInterval
-    sharp_move_threshold: float = 0.050  # default 5.0%
+    sharp_move_threshold: float = 0.025
 
     @field_validator("avg_price", "shares")
     @classmethod
@@ -180,8 +186,8 @@ class PortfolioContext(BaseModel): # agent 2
     """Has all the user positions and recent agent outputs"""
     user_id: str
     positions: list[AgentContext]
-    latest_outputs: list[AgentOutput] = []
-    timestamp: datetime = datetime.now()
+    latest_outputs: list[AgentOutput] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=utc_now)
 
     @property
     def tickers(self) -> list[str]:
@@ -206,36 +212,34 @@ class AgentOutput(BaseModel):
     summary: str
     recommendation: str
     confidence: Confidence
-    timestamp: datetime = datetime.now()
+    timestamp: datetime = Field(default_factory=utc_now)
     price_at_update: Optional[float] = None
     searched_web: bool = False
 
 class CrossPortfolioOutput(BaseModel):
     user_id: str
-    timestamp: datetime = datetime.now()
+    timestamp: datetime = Field(default_factory=utc_now)
     summary: str
-    correlations_flagged: Optional[list[str]] = []
-    tickers_analyzed: list[str] = []
+    correlations_flagged: list[str] = Field(default_factory=list)
+    tickers_analyzed: list[str] = Field(default_factory=list)
 
 
-class HypothesisOutput(BaseModel):
-    ticker: str
-    user_id: str
+class HypothesisOutput(AgentOutput):
+    event_type: EventType = EventType.HYPOTHESIS_SCAN
     summary: Optional[str] = None          # None if nothing flagged
+    recommendation: str = ""
     flagged: bool = False
-    confidence: Confidence
     recommended_next_scan_days: int        # Claude decides this
-    timestamp: datetime = datetime.now()
 
 # notifications ------
 
 class Alert(BaseModel):
     user_id: str
     ticker: str
-    timestamp: datetime = datetime.now()
+    timestamp: datetime = Field(default_factory=utc_now)
     alert_type: AlertType
     message: str
-    trigger_details: Optional[dict] = {}
+    trigger_details: dict = Field(default_factory=dict)
 
 
 class WhatsAppMessage(BaseModel):
