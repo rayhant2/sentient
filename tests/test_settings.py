@@ -1,0 +1,116 @@
+import os
+import unittest
+from unittest.mock import patch
+
+from pydantic import ValidationError
+
+from config.settings import Environment, LogLevel, Settings
+
+
+def load_settings(env: dict[str, str] | None = None) -> Settings:
+    with patch.dict(os.environ, env or {}, clear=True):
+        return Settings(_env_file=None)
+
+
+class SettingsTests(unittest.TestCase):
+    def test_defaults_load_without_real_secrets(self):
+        settings = load_settings()
+
+        self.assertEqual(settings.environment, Environment.LOCAL)
+        self.assertEqual(settings.log_level, LogLevel.INFO)
+        self.assertEqual(settings.max_ticker_datapoints, 150)
+        self.assertEqual(settings.price_fetch_interval_minutes, 15)
+        self.assertEqual(settings.sharp_move_check_interval_minutes, 15)
+        self.assertEqual(settings.default_sharp_move_threshold, 0.025)
+        self.assertEqual(settings.default_hypothesis_scan_days, 3)
+        self.assertFalse(settings.langsmith_tracing)
+        self.assertIsNone(settings.supabase_url)
+        self.assertIsNone(settings.polygon_api_key)
+
+    def test_env_vars_override_defaults(self):
+        settings = load_settings(
+            {
+                "ENVIRONMENT": "test",
+                "LOG_LEVEL": "debug",
+                "LANGSMITH_TRACING": "true",
+                "LANGSMITH_PROJECT": "sentient-tests",
+                "MAX_TICKER_DATAPOINTS": "200",
+                "PRICE_FETCH_INTERVAL_MINUTES": "30",
+                "DEFAULT_SHARP_MOVE_THRESHOLD": "0.04",
+                "TWILIO_WHATSAPP_FROM": "whatsapp:+15551234567",
+            }
+        )
+
+        self.assertEqual(settings.environment, Environment.TEST)
+        self.assertEqual(settings.log_level, LogLevel.DEBUG)
+        self.assertTrue(settings.langsmith_tracing)
+        self.assertEqual(settings.langsmith_project, "sentient-tests")
+        self.assertEqual(settings.max_ticker_datapoints, 200)
+        self.assertEqual(settings.price_fetch_interval_minutes, 30)
+        self.assertEqual(settings.default_sharp_move_threshold, 0.04)
+        self.assertEqual(settings.twilio_whatsapp_from, "whatsapp:+15551234567")
+
+    def test_secret_fields_are_loaded_as_secret_values(self):
+        settings = load_settings(
+            {
+                "SUPABASE_KEY": "supabase-secret",
+                "POLYGON_API_KEY": "polygon-secret",
+                "ANTHROPIC_API_KEY": "anthropic-secret",
+            }
+        )
+
+        self.assertEqual(settings.supabase_key.get_secret_value(), "supabase-secret")
+        self.assertEqual(settings.polygon_api_key.get_secret_value(), "polygon-secret")
+        self.assertEqual(settings.anthropic_api_key.get_secret_value(), "anthropic-secret")
+
+    def test_empty_env_values_are_ignored(self):
+        settings = load_settings(
+            {
+                "SUPABASE_URL": "",
+                "POLYGON_API_KEY": "",
+            }
+        )
+
+        self.assertIsNone(settings.supabase_url)
+        self.assertIsNone(settings.polygon_api_key)
+
+    def test_environment_rejects_unknown_value(self):
+        with self.assertRaises(ValidationError):
+            load_settings({"ENVIRONMENT": "banana"})
+
+    def test_threshold_rejects_values_outside_bounds(self):
+        with self.assertRaises(ValidationError):
+            load_settings({"DEFAULT_SHARP_MOVE_THRESHOLD": "0.0005"})
+
+        with self.assertRaises(ValidationError):
+            load_settings({"DEFAULT_SHARP_MOVE_THRESHOLD": "0.51"})
+
+    def test_intervals_and_counts_must_be_positive(self):
+        invalid_values = [
+            {"MAX_TICKER_DATAPOINTS": "0"},
+            {"PRICE_FETCH_INTERVAL_MINUTES": "0"},
+            {"SHARP_MOVE_CHECK_INTERVAL_MINUTES": "-1"},
+            {"DEFAULT_HYPOTHESIS_SCAN_DAYS": "0"},
+        ]
+
+        for env in invalid_values:
+            with self.subTest(env=env):
+                with self.assertRaises(ValidationError):
+                    load_settings(env)
+
+    def test_twilio_whatsapp_sender_must_use_whatsapp_prefix(self):
+        with self.assertRaises(ValidationError):
+            load_settings({"TWILIO_WHATSAPP_FROM": "+15551234567"})
+
+    def test_environment_helper_properties(self):
+        local = load_settings({"ENVIRONMENT": "local"})
+        test = load_settings({"ENVIRONMENT": "test"})
+        production = load_settings({"ENVIRONMENT": "production"})
+
+        self.assertTrue(local.is_local)
+        self.assertTrue(test.is_test)
+        self.assertTrue(production.is_production)
+
+
+if __name__ == "__main__":
+    unittest.main()
