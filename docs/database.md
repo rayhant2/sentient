@@ -26,7 +26,7 @@ One row per unique stock symbol across all users.
 Important fields:
 
 - `ticker`: primary key, stored uppercase.
-- `last_fetched`: last successful Polygon fetch.
+- `last_fetched`: last successful market-data fetch.
 - `next_fetch_time`: next scheduled fetch time.
 - `current_price`: latest known shared price.
 

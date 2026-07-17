@@ -39,6 +39,14 @@ dashboard. It does not connect to any brokerage and does not execute trades.
 4. **All agent prompts live in config/prompts.py.** Agent logic files contain
    graph structure and tool wiring. Prompt text is never hardcoded inside agent files.
 
+5. **Agent API costs are user-financed.** Shared market data remains system-owned
+   and fetched once per ticker, but LLM/agent calls must run with the API key
+   belonging to the user whose context is being analyzed. Do not pass user API
+   keys through `AgentContext`, prompts, logs, updates, alerts, or LangSmith
+   traces. Store and retrieve user-owned provider credentials through the database
+   layer, and resolve the correct key immediately before creating the agent model
+   client.
+
 ---
 
 ## Project Directory Structure
@@ -52,7 +60,7 @@ sentient/
 │   └── event_bus.py       # Observer/listener pattern, event emit + fan-out
 │
 ├── data/
-│   ├── polygon.py         # Polygon.io client, rolling 150-point OHLCV insert
+│   ├── twelve_data.py     # Twelve Data client, rolling 150-point OHLCV insert
 │   └── database.py        # Supabase client, ALL query functions (single interface)
 │
 ├── agents/
@@ -97,7 +105,7 @@ sentient/
 | Observability | LangSmith |
 | Scheduler | APScheduler |
 | Database | Supabase (Postgres, via supabase-py REST client) |
-| Price data | Polygon.io (free tier, 15-min delayed) |
+| Price data | Twelve Data (15-minute OHLCV) |
 | Web search | Anthropic web search tool (Codex-triggered) |
 | WhatsApp | Twilio |
 | Dashboard | Streamlit |
@@ -135,6 +143,17 @@ user-ticker pair. Everything else is either shared infrastructure or output hist
 ### `alerts`
 - `user_id`, `ticker`, `timestamp`, `alert_type`, `message`, `trigger_details`
 - Log of every WhatsApp notification sent
+
+### `user_api_keys` — REQUIRED BEFORE AGENTS
+- `user_id`, `provider`, `encrypted_api_key`, `created_at`, `updated_at`,
+  `last_validated_at`
+- One row per user/provider pair
+- Stores user-owned LLM provider credentials so each user's agent runs are billed
+  to that user, not to the Sentient backend owner
+- API keys should be encrypted before production; plaintext storage is acceptable
+  only for a temporary local prototype
+- Keys must never be included in `AgentContext`, agent prompts, LangSmith traces,
+  `updates`, `alerts`, or WhatsApp messages
 
 ---
 
@@ -349,7 +368,7 @@ set_earlier_cadence
 ## Data Flow — Full System End to End
 
 ```
-Polygon.io fetch (per ticker, shared)
+Twelve Data fetch (per ticker, shared)
     → rolling 150-point insert into ticker_data table
     → update current_price in tickers table + TickerRegistry
 
@@ -362,6 +381,8 @@ EventBus
     → queues LangGraph agent run per user
 
 LangGraph agent runs (per user, per ticker)
+    → resolves that user's LLM provider API key from database.py
+    → creates the model client for that user only
     → Codex reads AgentContext
     → Codex decides what to search (web search tool)
     → Codex runs multi-step investigation loop
@@ -406,20 +427,22 @@ Views:
 ## Planned Build Order
 
 1. Database schema — all five tables in Supabase
-2. `data/polygon.py` — price fetcher, rolling 150-point insert
+2. `data/twelve_data.py` — price fetcher, rolling 150-point insert
 3. `data/database.py` — all query functions, single Supabase interface
 4. `models/schemas.py` — ALREADY DONE
 5. `core/event_bus.py` — TickerRegistry, observer/listener pattern, fan-out logic
 6. `core/scheduler.py` — APScheduler, per-ticker interval management
 7. `core/monitor.py` — sharp move detection loop
-8. `agents/core.py` — LangGraph setup, Codex binding, web search tool definition
-9. `agents/sharp_move.py` — Agent 1 graph
-10. `agents/motive.py` — Agent 3 graph
-11. `agents/cross_portfolio.py` — Agent 2 graph
-12. `agents/hypothesis.py` — Agent 4 graph with dynamic cadence output
-13. `notifications/whatsapp.py` — Twilio client, five message formatters
-14. `dashboard/` — Streamlit app, views, components
-15. Multi-user auth — scope all dashboard queries by user_id
+8. User-owned agent API key storage — `user_api_keys` table, database functions,
+   encryption plan, and tests. This must be figured out before creating agents.
+9. `agents/core.py` — LangGraph setup, per-user Codex binding, web search tool definition
+10. `agents/sharp_move.py` — Agent 1 graph
+11. `agents/motive.py` — Agent 3 graph
+12. `agents/cross_portfolio.py` — Agent 2 graph
+13. `agents/hypothesis.py` — Agent 4 graph with dynamic cadence output
+14. `notifications/whatsapp.py` — Twilio client, five message formatters
+15. `dashboard/` — Streamlit app, views, components
+16. Multi-user auth — scope all dashboard queries by user_id
 
 ---
 
@@ -427,10 +450,15 @@ Views:
 
 - **Supabase connection:** Use the `supabase-py` REST client — no raw psycopg2,
   no connection pooling concerns at this scale
-- **Polygon.io:** Free tier (15-min delayed data) is acceptable; real-time is not
-  required for the current use case
+- **Twelve Data:** Use the official `twelvedata` Python client for 15-minute
+  OHLCV data. The free Basic plan is suitable for local prototyping only; review
+  commercial market-data licensing before making Sentient available to users.
 - **LangGraph vs raw Anthropic API:** LangGraph is used for all agent graphs;
   the raw Anthropic API is not called directly anywhere in the agents layer
+- **Per-user agent billing:** Agent model clients must be created with the user's
+  own provider API key. The backend `.env` API key may be kept only as a local
+  development fallback or admin override, not as the default production billing
+  source.
 - **LangSmith:** Enabled for tracing all agent runs; configured via env vars
 - **No brokerage integration:** Wealthsimple is not connected; Sentient is
   monitoring and advisory only

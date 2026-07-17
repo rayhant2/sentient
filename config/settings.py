@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     supabase_url: Optional[AnyUrl] = None
     supabase_key: Optional[SecretStr] = None
 
-    polygon_api_key: Optional[SecretStr] = None
+    twelve_data_api_key: Optional[SecretStr] = None
     anthropic_api_key: Optional[SecretStr] = None
 
     langsmith_tracing: bool = False

@@ -25,7 +25,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.default_hypothesis_scan_days, 3)
         self.assertFalse(settings.langsmith_tracing)
         self.assertIsNone(settings.supabase_url)
-        self.assertIsNone(settings.polygon_api_key)
+        self.assertIsNone(settings.twelve_data_api_key)
 
     def test_env_vars_override_defaults(self):
         settings = load_settings(
@@ -54,25 +54,27 @@ class SettingsTests(unittest.TestCase):
         settings = load_settings(
             {
                 "SUPABASE_KEY": "supabase-secret",
-                "POLYGON_API_KEY": "polygon-secret",
+                "TWELVE_DATA_API_KEY": "twelve-data-secret",
                 "ANTHROPIC_API_KEY": "anthropic-secret",
             }
         )
 
         self.assertEqual(settings.supabase_key.get_secret_value(), "supabase-secret")
-        self.assertEqual(settings.polygon_api_key.get_secret_value(), "polygon-secret")
+        self.assertEqual(
+            settings.twelve_data_api_key.get_secret_value(), "twelve-data-secret"
+        )
         self.assertEqual(settings.anthropic_api_key.get_secret_value(), "anthropic-secret")
 
     def test_empty_env_values_are_ignored(self):
         settings = load_settings(
             {
                 "SUPABASE_URL": "",
-                "POLYGON_API_KEY": "",
+                "TWELVE_DATA_API_KEY": "",
             }
         )
 
         self.assertIsNone(settings.supabase_url)
-        self.assertIsNone(settings.polygon_api_key)
+        self.assertIsNone(settings.twelve_data_api_key)
 
     def test_environment_rejects_unknown_value(self):
         with self.assertRaises(ValidationError):
