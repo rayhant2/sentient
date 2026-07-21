@@ -68,7 +68,8 @@ sentient/
 │   ├── sharp_move.py      # Agent 1
 │   ├── cross_portfolio.py # Agent 2
 │   ├── motive.py          # Agent 3
-│   └── hypothesis.py      # Agent 4
+│   ├── hypothesis.py      # Agent 4
+│   └── scheduled_review.py # Agent 5
 │
 ├── notifications/
 │   └── whatsapp.py        # Twilio client, message formatters per alert type
@@ -185,7 +186,7 @@ be imported from here throughout the codebase.
   and threshold (must be 0.1%–50%); computed property `position_value`
 
 ### Agent Input Models
-- `AgentContext` — input for Agents 1, 3, 4 (single ticker, single user); contains
+- `AgentContext` — input for Agents 1, 3, 4, 5 (single ticker, single user); contains
   150 datapoints, the user's Subscription, event_type, current_price, unrealized_pnl,
   unrealized_pnl_pct; property `is_profitable`
 - `PortfolioContext` — input for Agent 2 only (cross-portfolio); contains a list of
@@ -194,7 +195,7 @@ be imported from here throughout the codebase.
   `total_unrealized_pnl`
 
 ### Agent Output Models
-- `AgentOutput` — output for Agents 1, 3 (and base output for Agent 4); contains
+- `AgentOutput` — output for Agents 1, 3, 5 (and base output for Agent 4); contains
   ticker, user_id, event_type, summary, recommendation, confidence, timestamp,
   price_at_update, searched_web
 - `HypothesisOutput` — output specific to Agent 4; extends AgentOutput with
@@ -251,7 +252,7 @@ requiring a full reload.
 
 ---
 
-## The Four LangGraph Agents
+## The Five LangGraph Agents
 
 All agents are implemented as LangGraph graphs. The shared graph setup, tool
 definitions, and Codex model binding live in `agents/core.py`. Individual agent
@@ -365,6 +366,50 @@ set_earlier_cadence
 
 ---
 
+### Agent 5 — Scheduled Position Review (agents/scheduled_review.py)
+**Trigger:** `scheduled_update:{TICKER}` — daily or weekly per subscription
+**Input:** `AgentContext`
+**Output:** `AgentOutput` with alert_type `SCHEDULED`
+
+**Purpose:** Provides the routine, general assessment for a stock the user already
+owns or watches. This is the normal scheduled review path when no sharp-move,
+motive, or hypothesis event is required.
+
+The agent compares the current position with recent price behaviour and the most
+recent stored update, evaluates whether risk or trend has materially changed, and
+searches the web only when fresh external context is needed. It considers the
+user's cost basis, shares, motive, P&L, rolling price behaviour, volatility, and
+recent alerts before producing a measured recommendation.
+
+**LangGraph flow:**
+```
+ingest_position_and_history → compare_with_previous_review
+    → assess_trend_volatility_and_risk → external_context_needed?
+        ↓ yes                              ↓ no
+    targeted_web_search ───────────────→ synthesize → output
+```
+
+This agent reviews existing positions; it does not scan the wider market for new
+investments. Its recommendations must explain uncertainty and remain monitoring
+and advisory output, never brokerage actions.
+
+---
+
+## Future Opportunity Discovery Agent — NOT PART OF THE CURRENT FIVE
+
+A separate, opt-in Opportunity Discovery Agent is planned for a later phase. It
+will scan a deliberately bounded market universe, apply inexpensive quantitative
+filters first, and use agent research only for a small shortlist of candidates.
+Its output will be research opportunities with catalysts, risks, and reasons for
+further investigation — not unsupported buy instructions.
+
+This future agent remains separate because broad discovery has different market
+data, licensing, cost, ranking, and safety requirements from reviewing stocks a
+user already owns or watches. It must not be implemented until the five core
+agents, notifications, dashboard, and provider-cost controls are stable.
+
+---
+
 ## Data Flow — Full System End to End
 
 ```
@@ -436,13 +481,17 @@ Views:
 8. User-owned agent API key storage — `user_api_keys` table, database functions,
    encryption plan, and tests. This must be figured out before creating agents.
 9. `agents/core.py` — LangGraph setup, per-user Codex binding, web search tool definition
-10. `agents/sharp_move.py` — Agent 1 graph
-11. `agents/motive.py` — Agent 3 graph
-12. `agents/cross_portfolio.py` — Agent 2 graph
-13. `agents/hypothesis.py` — Agent 4 graph with dynamic cadence output
-14. `notifications/whatsapp.py` — Twilio client, five message formatters
-15. `dashboard/` — Streamlit app, views, components
-16. Multi-user auth — scope all dashboard queries by user_id
+10. `agents/scheduled_review.py` — Agent 5 routine daily/weekly position review
+11. `agents/sharp_move.py` — Agent 1 graph
+12. `agents/motive.py` — Agent 3 graph
+13. `agents/cross_portfolio.py` — Agent 2 graph
+14. `agents/hypothesis.py` — Agent 4 graph with dynamic cadence output
+15. `notifications/whatsapp.py` — Twilio client, five message formatters
+16. `dashboard/` — Streamlit app, views, components
+17. Multi-user auth — scope all dashboard queries by user_id
+
+The Opportunity Discovery Agent is a post-core expansion and is intentionally not
+included in this build order or in the count of five required agents.
 
 ---
 

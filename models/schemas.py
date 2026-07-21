@@ -168,7 +168,7 @@ class Subscription(BaseModel):
 
 # agent input -----
 
-class AgentContext(BaseModel): # agent 1, 3, 4
+class AgentContext(BaseModel): # agents 1, 3, 4, 5
     ticker: str
     datapoints: list[OHLCVPoint]
     subscription: Subscription
