@@ -73,7 +73,7 @@ class SchemaTests(unittest.TestCase):
     def test_subscription_defaults_and_computed_position_value(self):
         subscription = make_subscription()
 
-        self.assertEqual(subscription.sharp_move_threshold, 0.025)
+        self.assertEqual(subscription.sharp_move_threshold, 0.01)
         self.assertEqual(subscription.position_value, 200.0)
 
     def test_subscription_validates_threshold_bounds(self):

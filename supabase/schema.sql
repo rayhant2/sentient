@@ -44,7 +44,7 @@ create table if not exists public.subscriptions (
     shares numeric(18, 6) not null,
     motive text not null,
     update_interval text not null,
-    sharp_move_threshold numeric(8, 6) not null default 0.025,
+    sharp_move_threshold numeric(8, 6) not null default 0.01,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     primary key (user_id, ticker),
@@ -61,6 +61,9 @@ create table if not exists public.subscriptions (
         update_interval in ('daily', 'weekly')
     )
 );
+
+alter table public.subscriptions
+    alter column sharp_move_threshold set default 0.01;
 
 create table if not exists public.updates (
     id bigint generated always as identity primary key,

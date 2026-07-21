@@ -16,6 +16,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from config.settings import settings
 from core.event_bus import DispatchResult, EventBus, UnknownTickerError
+from core.monitor import SharpMoveMonitor
 from data.twelve_data import refresh_ticker_data
 from models.schemas import EventType, OHLCVPoint, TickerRegistry, UpdateInterval
 
@@ -85,6 +86,7 @@ class SentientScheduler:
         *,
         scheduler: Any | None = None,
         refresh_ticker: RefreshTicker | None = None,
+        monitor: SharpMoveMonitor | None = None,
         now_provider: NowProvider | None = None,
         jitter_provider: JitterProvider | None = None,
         requests_per_minute: int = settings.twelve_data_requests_per_minute,
@@ -108,6 +110,7 @@ class SentientScheduler:
         self.event_bus = event_bus
         self._scheduler = scheduler or BackgroundScheduler(timezone=MARKET_TIMEZONE)
         self._refresh_ticker = refresh_ticker or refresh_ticker_data
+        self._monitor = monitor or SharpMoveMonitor(event_bus)
         self._now = now_provider or (lambda: datetime.now(timezone.utc))
         self._jitter = jitter_provider or random.uniform
         self._max_retries = max_retries
@@ -313,6 +316,19 @@ class SentientScheduler:
             logger.info(
                 "Ticker %s left the registry while its refresh was running.",
                 symbol,
+            )
+
+        try:
+            self._monitor.evaluate_ticker(
+                symbol,
+                points,
+                now=self._now().astimezone(timezone.utc),
+            )
+        except Exception as exc:
+            logger.error(
+                "Sharp-move evaluation failed for %s after a successful refresh: %s",
+                symbol,
+                type(exc).__name__,
             )
 
         self._finish_ticker(symbol, failed=False)

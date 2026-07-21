@@ -149,10 +149,12 @@ class SchedulerTests(unittest.TestCase):
         bus = EventBus()
         bus.refresh_subscription(subscription("user-1", "NVDA"))
         refresh = Mock(return_value=points())
+        monitor = Mock()
         scheduler = SentientScheduler(
             bus,
             scheduler=FakeScheduler(),
             refresh_ticker=refresh,
+            monitor=monitor,
             now_provider=lambda: self.now,
         )
         scheduler._queued_tickers.add("NVDA")
@@ -166,6 +168,11 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(bus.registry["NVDA"].last_fetched, self.now)
         self.assertNotIn("NVDA", scheduler._queued_tickers)
         self.assertNotIn("NVDA", scheduler.failed_tickers)
+        monitor.evaluate_ticker.assert_called_once_with(
+            "NVDA",
+            points(),
+            now=self.now,
+        )
 
     def test_temporary_failure_schedules_short_delayed_retry(self):
         bus = EventBus()
@@ -189,6 +196,26 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(retry.kwargs["run_date"], self.now + timedelta(seconds=5))
         self.assertEqual(retry.kwargs["args"], ["NVDA", 1])
         self.assertIn("NVDA", scheduler._queued_tickers)
+        self.assertNotIn("NVDA", scheduler.failed_tickers)
+
+    def test_monitor_failure_does_not_retry_successful_market_fetch(self):
+        bus = EventBus()
+        bus.refresh_subscription(subscription("user-1", "NVDA"))
+        backend = FakeScheduler()
+        monitor = Mock()
+        monitor.evaluate_ticker.side_effect = RuntimeError("monitor unavailable")
+        scheduler = SentientScheduler(
+            bus,
+            scheduler=backend,
+            refresh_ticker=Mock(return_value=points()),
+            monitor=monitor,
+            now_provider=lambda: self.now,
+        )
+
+        succeeded = scheduler._run_ticker_refresh("NVDA")
+
+        self.assertTrue(succeeded)
+        self.assertNotIn(f"{MARKET_RETRY_JOB_PREFIX}NVDA", backend.jobs)
         self.assertNotIn("NVDA", scheduler.failed_tickers)
 
     def test_rate_limit_failure_waits_at_least_65_seconds(self):

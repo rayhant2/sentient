@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     twelve_data_max_retries: int = 2
     twelve_data_retry_base_delay_seconds: float = 5.0
     sharp_move_check_interval_minutes: int = 15
-    default_sharp_move_threshold: float = 0.025
+    default_sharp_move_threshold: float = 0.01
     default_hypothesis_scan_days: int = 3
 
     @field_validator("log_level", mode="before")

@@ -25,7 +25,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.twelve_data_max_retries, 2)
         self.assertEqual(settings.twelve_data_retry_base_delay_seconds, 5.0)
         self.assertEqual(settings.sharp_move_check_interval_minutes, 15)
-        self.assertEqual(settings.default_sharp_move_threshold, 0.025)
+        self.assertEqual(settings.default_sharp_move_threshold, 0.01)
         self.assertEqual(settings.default_hypothesis_scan_days, 3)
         self.assertFalse(settings.langsmith_tracing)
         self.assertIsNone(settings.supabase_url)

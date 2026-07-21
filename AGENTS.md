@@ -181,7 +181,7 @@ be imported from here throughout the codebase.
 ### User & Subscription Models
 - `User` — user_id, whatsapp_number, email, preferences
 - `Subscription` — user_id, ticker, avg_price, shares, motive, update_interval,
-  sharp_move_threshold (default 2.5%); validators on avg_price/shares (must be > 0)
+  sharp_move_threshold (default 1%); validators on avg_price/shares (must be > 0)
   and threshold (must be 0.1%–50%); computed property `position_value`
 
 ### Agent Input Models

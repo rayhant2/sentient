@@ -21,6 +21,10 @@ quota. A shared request gate also serializes calls and enforces spacing when a
 retry happens near a normal request. Multiple users watching one ticker still
 produce only one market-data request.
 
+After each successful refresh, the scheduler passes the returned candles to the
+sharp-move monitor. Monitoring errors are isolated from market-data success, so a
+detector or handler problem cannot cause a duplicate provider retry.
+
 Regular refresh jobs run Monday through Friday in the `America/New_York`
 timezone: 9:46 AM, every 15 minutes from 10:01 AM through 3:46 PM, and 4:01 PM.
 This places requests just after each regular-session candle closes. Exchange

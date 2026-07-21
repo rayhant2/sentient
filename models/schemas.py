@@ -143,7 +143,7 @@ class Subscription(BaseModel):
     shares: float
     motive: Motive
     update_interval: UpdateInterval
-    sharp_move_threshold: float = 0.025
+    sharp_move_threshold: float = 0.01
 
     @field_validator("avg_price", "shares")
     @classmethod
