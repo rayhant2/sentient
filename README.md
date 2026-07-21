@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="public/Sentient_Logo.png" alt="Sentient Logo" width="100">
+  <img src="public/Sentient_Logo.png" alt="Sapient Logo" width="100">
 </p>
 
-# Sentient
+# Sapient
 
 
 
