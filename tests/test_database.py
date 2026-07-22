@@ -1,7 +1,10 @@
+import base64
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import unittest
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from pydantic import SecretStr
 from pydantic import ValidationError
 
 from data import database
@@ -19,6 +22,7 @@ from models.schemas import (
     UpdateInterval,
     User,
 )
+from security.credentials import CredentialCipher
 
 
 class FakeTable:
@@ -149,7 +153,71 @@ def alert_row():
     }
 
 
+def credential_cipher():
+    key = base64.urlsafe_b64encode(AESGCM.generate_key(bit_length=256)).decode("ascii")
+    return CredentialCipher(active_key=key, active_key_id="test-v1")
+
+
+def credential_row(encrypted_api_key: str):
+    return {
+        "user_id": "user-1",
+        "provider": "anthropic",
+        "encrypted_api_key": encrypted_api_key,
+        "encryption_version": 1,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "last_validated_at": None,
+    }
+
+
 class DatabaseTests(unittest.TestCase):
+    def test_store_and_resolve_user_api_key_never_writes_plaintext(self):
+        cipher = credential_cipher()
+        stored_row = credential_row(
+            cipher.encrypt("sk-user-secret", user_id="user-1", provider="anthropic")
+        )
+        client = FakeClient({"user_api_keys": [[stored_row], [stored_row]]})
+
+        metadata = database.store_user_api_key(
+            "user-1",
+            "ANTHROPIC",
+            SecretStr("sk-user-secret"),
+            client=client,
+            cipher=cipher,
+        )
+        resolved = database.resolve_user_api_key(
+            "user-1",
+            "anthropic",
+            client=client,
+            cipher=cipher,
+        )
+
+        write_payload = client.tables[0].calls[0][1][0]
+        resolver_selection = client.tables[1].calls[0][1][0]
+        self.assertEqual(metadata.provider, "anthropic")
+        self.assertNotIn("sk-user-secret", write_payload["encrypted_api_key"])
+        self.assertEqual(resolved.get_secret_value(), "sk-user-secret")
+        self.assertIn("encrypted_api_key", resolver_selection)
+        self.assertNotEqual(resolver_selection, "*")
+
+    def test_credential_metadata_query_never_selects_ciphertext(self):
+        row = credential_row("unused")
+        client = FakeClient({"user_api_keys": [[row]]})
+
+        metadata = database.list_user_api_key_metadata("user-1", client=client)
+
+        selected_columns = client.tables[0].calls[0][1][0]
+        self.assertEqual(len(metadata), 1)
+        self.assertNotIn("encrypted_api_key", selected_columns)
+
+    def test_delete_user_api_key_scopes_user_and_provider(self):
+        client = FakeClient({"user_api_keys": []})
+
+        database.delete_user_api_key("user-1", "ANTHROPIC", client=client)
+
+        self.assertIn(("eq", ("user_id", "user-1"), {}), client.tables[0].calls)
+        self.assertIn(("eq", ("provider", "anthropic"), {}), client.tables[0].calls)
+
     def test_create_user_inserts_and_returns_model(self):
         client = FakeClient({"users": [user_row()]})
         user = User(
@@ -172,6 +240,14 @@ class DatabaseTests(unittest.TestCase):
         self.assertIsNone(database.get_user("missing-user", client=client))
         self.assertIn(("eq", ("user_id", "missing-user"), {}), client.tables[0].calls)
         self.assertIn(("limit", (1,), {}), client.tables[0].calls)
+
+    def test_delete_user_scopes_delete_to_user_id(self):
+        client = FakeClient({"users": []})
+
+        database.delete_user("user-1", client=client)
+
+        self.assertIn(("delete", (), {}), client.tables[0].calls)
+        self.assertIn(("eq", ("user_id", "user-1"), {}), client.tables[0].calls)
 
     def test_upsert_ticker_uppercases_symbol(self):
         client = FakeClient({"tickers": [ticker_row()]})

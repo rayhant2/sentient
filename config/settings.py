@@ -33,6 +33,11 @@ class Settings(BaseSettings):
 
     supabase_url: Optional[AnyUrl] = None
     supabase_key: Optional[SecretStr] = None
+    supabase_secret_key: Optional[SecretStr] = None
+
+    credential_encryption_key: Optional[SecretStr] = None
+    credential_encryption_key_id: str = "primary-v1"
+    credential_previous_encryption_keys: Optional[SecretStr] = None
 
     twelve_data_api_key: Optional[SecretStr] = None
     anthropic_api_key: Optional[SecretStr] = None
@@ -104,6 +109,15 @@ class Settings(BaseSettings):
     def langsmith_project_must_not_be_blank(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("langsmith_project must not be blank")
+        return value
+
+    @field_validator("credential_encryption_key_id")
+    @classmethod
+    def credential_key_id_must_be_valid(cls, value: str) -> str:
+        if not value or len(value) > 64:
+            raise ValueError("credential_encryption_key_id must be 1-64 characters")
+        if not all(character.isalnum() or character in "._-" for character in value):
+            raise ValueError("credential_encryption_key_id contains invalid characters")
         return value
 
     @field_validator("twilio_whatsapp_from")

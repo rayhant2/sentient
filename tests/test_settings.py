@@ -66,12 +66,25 @@ class SettingsTests(unittest.TestCase):
         settings = load_settings(
             {
                 "SUPABASE_KEY": "supabase-secret",
+                "SUPABASE_SECRET_KEY": "supabase-backend-secret",
+                "CREDENTIAL_ENCRYPTION_KEY": "credential-secret",
+                "CREDENTIAL_PREVIOUS_ENCRYPTION_KEYS": '{"old":"old-secret"}',
                 "TWELVE_DATA_API_KEY": "twelve-data-secret",
                 "ANTHROPIC_API_KEY": "anthropic-secret",
             }
         )
 
         self.assertEqual(settings.supabase_key.get_secret_value(), "supabase-secret")
+        self.assertEqual(
+            settings.supabase_secret_key.get_secret_value(), "supabase-backend-secret"
+        )
+        self.assertEqual(
+            settings.credential_encryption_key.get_secret_value(), "credential-secret"
+        )
+        self.assertEqual(
+            settings.credential_previous_encryption_keys.get_secret_value(),
+            '{"old":"old-secret"}',
+        )
         self.assertEqual(
             settings.twelve_data_api_key.get_secret_value(), "twelve-data-secret"
         )
@@ -135,6 +148,10 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(local.is_local)
         self.assertTrue(test.is_test)
         self.assertTrue(production.is_production)
+
+    def test_credential_key_id_rejects_unsafe_characters(self):
+        with self.assertRaises(ValidationError):
+            load_settings({"CREDENTIAL_ENCRYPTION_KEY_ID": "key with spaces"})
 
 
 if __name__ == "__main__":

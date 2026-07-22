@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Optional, TypeVar
 
 from pydantic import BaseModel
+from pydantic import SecretStr
 from supabase import Client, create_client
 
 from config.settings import settings
@@ -14,6 +16,12 @@ from models.schemas import (
     Subscription,
     Ticker,
     User,
+)
+from security.credentials import (
+    CredentialCipher,
+    UserApiKeyMetadata,
+    get_credential_cipher,
+    normalize_provider,
 )
 
 
@@ -41,8 +49,25 @@ def get_supabase_client() -> Client:
     )
 
 
+@lru_cache(maxsize=1)
+def get_supabase_admin_client() -> Client:
+    if settings.supabase_url is None or settings.supabase_secret_key is None:
+        raise MissingSupabaseConfigError(
+            "SUPABASE_URL and SUPABASE_SECRET_KEY must be set before accessing credentials."
+        )
+
+    return create_client(
+        str(settings.supabase_url).rstrip("/"),
+        settings.supabase_secret_key.get_secret_value(),
+    )
+
+
 def _client(client: Optional[Client] = None) -> Client:
     return client or get_supabase_client()
+
+
+def _credential_client(client: Optional[Client] = None) -> Client:
+    return client or get_supabase_admin_client()
 
 
 def _model_payload(model: BaseModel, *, exclude_none: bool = True) -> dict[str, Any]:
@@ -90,6 +115,144 @@ def _ticker_symbol(ticker: str) -> str:
     return ticker.upper()
 
 
+def _parse_datetime(value: Any, field_name: str) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise DatabaseError(f"Invalid {field_name} timestamp returned by database.") from exc
+    raise DatabaseError(f"Missing or invalid {field_name} timestamp returned by database.")
+
+
+def _credential_metadata(row: dict[str, Any]) -> UserApiKeyMetadata:
+    validated = row.get("last_validated_at")
+    return UserApiKeyMetadata(
+        user_id=row["user_id"],
+        provider=normalize_provider(row["provider"]),
+        created_at=_parse_datetime(row.get("created_at"), "created_at"),
+        updated_at=_parse_datetime(row.get("updated_at"), "updated_at"),
+        last_validated_at=(
+            _parse_datetime(validated, "last_validated_at") if validated is not None else None
+        ),
+    )
+
+
+def store_user_api_key(
+    user_id: str,
+    provider: str,
+    api_key: SecretStr | str,
+    *,
+    client: Optional[Client] = None,
+    cipher: CredentialCipher | None = None,
+) -> UserApiKeyMetadata:
+    normalized_provider = normalize_provider(provider)
+    protector = cipher or get_credential_cipher()
+    encrypted_api_key = protector.encrypt(
+        api_key,
+        user_id=user_id,
+        provider=normalized_provider,
+    )
+    payload = {
+        "user_id": user_id,
+        "provider": normalized_provider,
+        "encrypted_api_key": encrypted_api_key,
+        "encryption_version": 1,
+        "last_validated_at": None,
+    }
+    response = _execute(
+        _credential_client(client)
+        .table("user_api_keys")
+        .upsert(payload, on_conflict="user_id,provider")
+    )
+    row = _require_single_row(response.data, "store_user_api_key")
+    return _credential_metadata(row)
+
+
+def resolve_user_api_key(
+    user_id: str,
+    provider: str,
+    *,
+    client: Optional[Client] = None,
+    cipher: CredentialCipher | None = None,
+) -> SecretStr | None:
+    normalized_provider = normalize_provider(provider)
+    response = _execute(
+        _credential_client(client)
+        .table("user_api_keys")
+        .select("user_id,provider,encrypted_api_key,encryption_version")
+        .eq("user_id", user_id)
+        .eq("provider", normalized_provider)
+        .limit(1)
+    )
+    row = _single_row(response.data)
+    if row is None:
+        return None
+    if row.get("encryption_version") != 1:
+        raise DatabaseError("Stored credential uses an unsupported encryption version.")
+    protector = cipher or get_credential_cipher()
+    return protector.decrypt(
+        row["encrypted_api_key"],
+        user_id=user_id,
+        provider=normalized_provider,
+    )
+
+
+def list_user_api_key_metadata(
+    user_id: str,
+    *,
+    client: Optional[Client] = None,
+) -> list[UserApiKeyMetadata]:
+    response = _execute(
+        _credential_client(client)
+        .table("user_api_keys")
+        .select("user_id,provider,created_at,updated_at,last_validated_at")
+        .eq("user_id", user_id)
+        .order("provider")
+    )
+    if response.data is None:
+        return []
+    if not isinstance(response.data, list):
+        raise DatabaseError("Expected a list of credential metadata rows.")
+    return [_credential_metadata(row) for row in response.data]
+
+
+def mark_user_api_key_validated(
+    user_id: str,
+    provider: str,
+    *,
+    validated_at: datetime | None = None,
+    client: Optional[Client] = None,
+) -> UserApiKeyMetadata:
+    normalized_provider = normalize_provider(provider)
+    timestamp = validated_at or datetime.now(timezone.utc)
+    response = _execute(
+        _credential_client(client)
+        .table("user_api_keys")
+        .update({"last_validated_at": timestamp.isoformat()})
+        .eq("user_id", user_id)
+        .eq("provider", normalized_provider)
+    )
+    row = _require_single_row(response.data, "mark_user_api_key_validated")
+    return _credential_metadata(row)
+
+
+def delete_user_api_key(
+    user_id: str,
+    provider: str,
+    *,
+    client: Optional[Client] = None,
+) -> None:
+    _execute(
+        _credential_client(client)
+        .table("user_api_keys")
+        .delete()
+        .eq("user_id", user_id)
+        .eq("provider", normalize_provider(provider))
+    )
+
+
 def create_user(user: User, *, client: Optional[Client] = None) -> User:
     response = _execute(_client(client).table("users").insert(_model_payload(user)))
     row = _require_single_row(response.data, "create_user")
@@ -116,6 +279,15 @@ def get_user(user_id: str, *, client: Optional[Client] = None) -> Optional[User]
     )
     row = _single_row(response.data)
     return _parse_model(User, row) if row else None
+
+
+def delete_user(user_id: str, *, client: Optional[Client] = None) -> None:
+    _execute(
+        _client(client)
+        .table("users")
+        .delete()
+        .eq("user_id", user_id)
+    )
 
 
 def upsert_ticker(ticker: Ticker, *, client: Optional[Client] = None) -> Ticker:
